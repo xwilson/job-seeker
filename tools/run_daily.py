@@ -11,8 +11,12 @@ Usage:
 """
 import argparse
 import json
+import os
 import subprocess
 import sys
+
+from dotenv import load_dotenv
+load_dotenv()
 from datetime import datetime
 from pathlib import Path
 
@@ -20,7 +24,7 @@ TMP_DIR = Path(".tmp")
 TMP_DIR.mkdir(exist_ok=True)
 
 DAILY_CAP = 10
-SCORE_THRESHOLD = 85
+SCORE_THRESHOLD = int(os.environ.get("MATCH_SCORE_THRESHOLD", "85"))
 PYTHON = sys.executable
 
 

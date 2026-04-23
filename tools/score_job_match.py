@@ -20,7 +20,8 @@ load_dotenv()
 PROFILE_PATH = Path("resume/my_profile.md")
 TMP_DIR = Path(".tmp")
 MODEL = "anthropic/claude-opus-4-7"
-SCORE_THRESHOLD = 85
+SCORE_THRESHOLD = int(os.environ.get("MATCH_SCORE_THRESHOLD", "85"))
+MIN_SALARY = int(os.environ.get("MIN_SALARY", "200000"))
 
 # Domains that are clearly not relevant — skip LLM call immediately
 IRRELEVANT_KEYWORDS = [
@@ -45,12 +46,10 @@ def is_irrelevant(title: str) -> bool:
     return any(kw in title_lower for kw in IRRELEVANT_KEYWORDS)
 
 
-def _explicit_low_salary(salary_field: str, jd_lower: str) -> bool:
-    """Return True if compensation is explicitly stated below $200K."""
+def _explicit_low_salary(salary_field: str, jd_lower: str, min_salary: int) -> bool:
+    """Return True if compensation is explicitly stated below min_salary."""
     import re
-    # Look for dollar amounts in the salary field or JD
     for text in (salary_field, jd_lower):
-        # Match patterns like $120,000 / $120K / 120,000 / 120k
         for m in re.finditer(r"\$?([\d,]+)\s*[kK]?\b", text):
             raw = m.group(1).replace(",", "")
             try:
@@ -58,7 +57,7 @@ def _explicit_low_salary(salary_field: str, jd_lower: str) -> bool:
                 if m.group(0).lower().endswith("k") or "k" in m.group(0).lower():
                     val *= 1000
                 # Only treat as salary if plausible annual comp range
-                if 30000 <= val < 200000:
+                if 30000 <= val < min_salary:
                     return True
             except ValueError:
                 continue
@@ -79,18 +78,19 @@ def score_job(client: OpenAI, profile: str, job: dict) -> dict:
         job["match_reason"] = "Insufficient job description text"
         return job
 
-    # Hard gate: if salary is explicitly stated below $200K, reject immediately
+    # Hard gate: if salary is explicitly stated below MIN_SALARY, reject immediately
     salary_field = job.get("salary", "")
     jd_lower = jd_text.lower()
-    if _explicit_low_salary(salary_field, jd_lower):
+    if _explicit_low_salary(salary_field, jd_lower, MIN_SALARY):
         job["match_score"] = 0
         job["match_reason"] = "Stated compensation is below $200K threshold"
         return job
 
+    min_salary_k = MIN_SALARY // 1000
     system_prompt = f"""You are a job matching assistant. Score job postings against a candidate profile.
 
-HARD REQUIREMENT: If the job description explicitly states total compensation below $200,000/year
-(base salary, not equity), return {{"match_score": 0, "match_reason": "Salary below $200K threshold"}} immediately.
+HARD REQUIREMENT: If the job description explicitly states total compensation below ${min_salary_k}K/year
+(base salary, not equity), return {{"match_score": 0, "match_reason": "Salary below ${min_salary_k}K threshold"}} immediately.
 
 Scoring criteria (total 100 points):
 - Role seniority (20 pts): Senior IC (Staff/Principal/Senior), architect, or engineering manager. Not junior, not C-suite/VP.
