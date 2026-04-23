@@ -20,7 +20,7 @@ TMP_DIR = Path(".tmp")
 TMP_DIR.mkdir(exist_ok=True)
 
 DAILY_CAP = 10
-SCORE_THRESHOLD = 70
+SCORE_THRESHOLD = 85
 PYTHON = sys.executable
 
 

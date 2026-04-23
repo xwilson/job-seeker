@@ -1,5 +1,10 @@
 {
   "mcpServers": {
+    "linkedin": {
+      "command": "npx",
+      "args": ["-y", "@administrativetrick/linkedin-jobs-mcp"],
+      "type": "stdio"
+    },
     "playwright": {
       "command": "npx",
       "args": ["@playwright/mcp@latest"],

@@ -20,7 +20,7 @@ load_dotenv()
 PROFILE_PATH = Path("resume/my_profile.md")
 TMP_DIR = Path(".tmp")
 MODEL = "anthropic/claude-opus-4-7"
-SCORE_THRESHOLD = 70
+SCORE_THRESHOLD = 85
 
 # Domains that are clearly not relevant — skip LLM call immediately
 IRRELEVANT_KEYWORDS = [
@@ -45,6 +45,26 @@ def is_irrelevant(title: str) -> bool:
     return any(kw in title_lower for kw in IRRELEVANT_KEYWORDS)
 
 
+def _explicit_low_salary(salary_field: str, jd_lower: str) -> bool:
+    """Return True if compensation is explicitly stated below $200K."""
+    import re
+    # Look for dollar amounts in the salary field or JD
+    for text in (salary_field, jd_lower):
+        # Match patterns like $120,000 / $120K / 120,000 / 120k
+        for m in re.finditer(r"\$?([\d,]+)\s*[kK]?\b", text):
+            raw = m.group(1).replace(",", "")
+            try:
+                val = int(raw)
+                if m.group(0).lower().endswith("k") or "k" in m.group(0).lower():
+                    val *= 1000
+                # Only treat as salary if plausible annual comp range
+                if 30000 <= val < 200000:
+                    return True
+            except ValueError:
+                continue
+    return False
+
+
 def score_job(client: OpenAI, profile: str, job: dict) -> dict:
     title = job.get("title", "")
     jd_text = job.get("jd_text", "").strip()
@@ -59,14 +79,29 @@ def score_job(client: OpenAI, profile: str, job: dict) -> dict:
         job["match_reason"] = "Insufficient job description text"
         return job
 
+    # Hard gate: if salary is explicitly stated below $200K, reject immediately
+    salary_field = job.get("salary", "")
+    jd_lower = jd_text.lower()
+    if _explicit_low_salary(salary_field, jd_lower):
+        job["match_score"] = 0
+        job["match_reason"] = "Stated compensation is below $200K threshold"
+        return job
+
     system_prompt = f"""You are a job matching assistant. Score job postings against a candidate profile.
 
+HARD REQUIREMENT: If the job description explicitly states total compensation below $200,000/year
+(base salary, not equity), return {{"match_score": 0, "match_reason": "Salary below $200K threshold"}} immediately.
+
 Scoring criteria (total 100 points):
-- Role seniority (25 pts): Senior IC (Staff/Principal/Senior), architect, or engineering manager. Not junior, not C-suite/VP.
-- Tech stack overlap (30 pts): Proportional to matches among: Java, Python, Spark, Kafka, AWS, Kubernetes, distributed systems, streaming, batch pipelines, data platforms.
-- Domain fit (20 pts): Financial services, enterprise data platforms, large-scale systems preferred.
-- Company quality (15 pts): Stable company, clear role, reasonable culture signals.
+- Role seniority (20 pts): Senior IC (Staff/Principal/Senior), architect, or engineering manager. Not junior, not C-suite/VP.
+- Tech stack overlap (25 pts): Proportional to matches among: Java, Python, Spark, Kafka, AWS, Kubernetes, distributed systems, streaming, batch pipelines, data platforms.
+- Domain fit (15 pts): Financial services, enterprise data platforms, large-scale systems preferred.
+- Company quality (10 pts): Stable company, clear role, reasonable culture signals.
 - Location fit (10 pts): Full points for remote or Dallas TX. Partial for hybrid Dallas area. Zero for required relocation.
+- Compensation signals (20 pts): Does the role credibly pay $200K+ total comp?
+    - 20 pts: Salary stated ≥$200K, or FAANG/top-tier finance firm at Staff+/Architect/Manager level
+    - 10 pts: Large enterprise at senior level, salary not stated but role type typically pays $200K+
+    - 0 pts: Salary stated below $200K, or startup/small company where stated range is below threshold
 
 Return ONLY valid JSON on a single line:
 {{"match_score": <integer 0-100>, "match_reason": "<one sentence explaining the score>"}}
@@ -77,6 +112,7 @@ Candidate Profile:
     user_prompt = f"""Job Title: {title}
 Company: {job.get("company", "")}
 Location: {job.get("location", "")}
+Salary/Compensation (if listed): {salary_field or "not stated"}
 
 Job Description:
 {jd_text[:4000]}"""

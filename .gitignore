@@ -3,6 +3,7 @@
 
 # Claude runtime files
 .claude/scheduled_tasks.lock
+.claude/settings.local.json
 
 # Browser session cookies (LinkedIn login state)
 .tmp/

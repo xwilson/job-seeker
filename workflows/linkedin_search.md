@@ -1,47 +1,45 @@
-# Workflow: LinkedIn Job Search
+# Workflow: LinkedIn Job Search via MCP
 
 ## Objective
-Search LinkedIn for job postings in the last 24 hours that match the candidate's background in senior data engineering, distributed systems, and platform architecture.
+Use the LinkedIn MCP tool to search for job postings in the last 24 hours matching the candidate's background.
+
+## MCP Tool
+`search_linkedin_jobs` from the `@administrativetrick/linkedin-jobs-mcp` server (configured in `.claude/settings.json`).
 
 ## Search Queries
-Run each query sequentially. Deduplicate results by job ID before returning.
+Run each query. Collect and deduplicate results by `job_id` across all calls.
 
-1. `"Senior Data Engineer"` — Dallas, TX + Remote
-2. `"Data Architect"` — Dallas, TX + Remote
-3. `"Principal Engineer Data Platform"` — Dallas, TX + Remote
-4. `"Engineering Manager Data"` — Dallas, TX + Remote
-5. `"Distributed Systems Engineer"` — Dallas, TX + Remote
-6. `"Staff Engineer Data"` — Dallas, TX + Remote
+| Keyword | Location | Date | Employment | Work | Salary |
+|---------|----------|------|-----------|------|--------|
+| Senior Data Engineer | Dallas, TX | 24hr | full-time | — | 120000 |
+| Senior Data Engineer | Remote | 24hr | full-time | remote | 120000 |
+| Data Architect | Dallas, TX | 24hr | full-time | — | 120000 |
+| Data Architect | Remote | 24hr | full-time | remote | 120000 |
+| Principal Engineer Data Platform | Remote | 24hr | full-time | — | 120000 |
+| Engineering Manager Data | Remote | 24hr | full-time | — | 120000 |
+| Distributed Systems Engineer | Remote | 24hr | full-time | — | 120000 |
+| Staff Engineer Data | Remote | 24hr | full-time | — | 120000 |
 
-## Filters
-- **Date posted**: Last 24 hours
-- **Location**: Dallas, TX OR Remote
-- **Experience level**: Mid-Senior, Director (exclude Entry, Internship)
+**Note on salary filter**: The MCP supports salary up to "120000" as a minimum filter. The $200K hard requirement is enforced downstream in `tools/score_job_match.py` via LLM analysis of each job description.
 
-## Session Management
-- Browser session stored at `.tmp/linkedin_session/`
-- On first run or expired session: log in using `LINKEDIN_EMAIL` + `LINKEDIN_PASSWORD` from `.env`
-- If login requires 2FA or CAPTCHA: abort; log to `.tmp/errors_YYYYMMDD.log`; do not attempt automated bypass
-- After successful login, session cookies are persisted automatically
-
-## Data to Extract Per Job
-```json
-{
-  "job_id": "string (LinkedIn job ID from URL)",
-  "title": "string",
-  "company": "string",
-  "location": "string",
-  "apply_type": "easy_apply | external",
-  "apply_url": "string (LinkedIn URL for easy_apply, external URL for external)",
-  "jd_text": "string (full job description text)",
-  "posted_date": "string (ISO 8601 or relative like '12 hours ago')"
-}
+## MCP Call Example
+```
+search_linkedin_jobs(
+  keyword="Senior Data Engineer",
+  location="Dallas, TX",
+  dateSincePosted="24hr",
+  jobType="full-time",
+  remoteFilter="",
+  salary="120000",
+  limit=25
+)
 ```
 
-## Rate Limiting
-- Add a random 1–3 second delay between page loads
-- Do not run more than 6 search queries per session
-- If LinkedIn shows a security challenge mid-session: stop, save what was collected so far, log the error
+## After All Queries
+1. Combine all results into one array
+2. Deduplicate by `job_id` (or URL if no ID)
+3. Pass the array to `tools/search_linkedin_jobs.py --jobs-json '<array>'` to normalise and write `.tmp/jobs_YYYYMMDD.json`
 
-## Output
-`.tmp/jobs_YYYYMMDD.json` — array of job objects
+## Rate Limiting
+- Add a short pause between MCP calls if making more than 4 in quick succession
+- If the MCP returns an error mid-run: save results collected so far, log the error, continue with the pipeline
